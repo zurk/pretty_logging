@@ -9,7 +9,6 @@ from functools import wraps
 from pathlib import Path
 from typing import Callable, Dict, Optional, Sequence, Tuple, Union
 
-import numpy
 from tqdm import tqdm
 
 _log = logging.getLogger(Path(__file__).stem)
@@ -107,8 +106,9 @@ class NumpyLogRecord(logging.LogRecord):
     """
 
     @staticmethod
-    def array2string(arr: numpy.ndarray) -> str:
+    def array2string(arr: "numpy.ndarray") -> str:
         """Format numpy array as a string."""
+        import numpy
         shape = str(arr.shape)[1:-1]
         if shape.endswith(","):
             shape = shape[:-1]
@@ -120,6 +120,10 @@ class NumpyLogRecord(logging.LogRecord):
         Return the message for this LogRecord after merging any user-supplied \
         arguments with the message.
         """
+        try:
+            import numpy
+        except ImportError:
+            return super().getMessage()
         if isinstance(self.msg, numpy.ndarray):
             msg = self.array2string(self.msg)
         else:

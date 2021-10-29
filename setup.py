@@ -17,7 +17,6 @@ setup(
     download_url="https://github.com/zurk/pretty_logging",
     packages=["pretty_logging"],
     install_requires=[
-        "numpy",
         "tqdm",
     ],
     classifiers=[
