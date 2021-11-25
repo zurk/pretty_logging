@@ -192,7 +192,7 @@ def timeit(logger: Optional[logging.Logger] = None, level: int = logging.DEBUG):
             if logger is None:
                 try:
                     logger = args[0]._log
-                except (KeyError, AttributeError):
+                except (KeyError, AttributeError, IndexError):
                     logger = _log
             logger.log(level, f"{func.__name__} took {delta:.3f} sec")
             return res
