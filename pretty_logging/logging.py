@@ -40,6 +40,64 @@ else:
 del _now
 
 
+class StreamHandlerEnsureMessageFromNewLine(logging.StreamHandler):
+    _new_line_in_the_last_msg = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            beginner = self._get_line_beginner(msg)
+
+            if not self._new_line_in_the_last_msg:
+                beginner = "\n"
+            msg = beginner + msg + self.terminator
+
+            self.set_last_character(msg)
+            stream.write(msg)
+            self.flush()
+        except RecursionError:  # See issue 36272
+            raise
+        except Exception:
+            self.handleError(record)
+
+    def _get_line_beginner(self, msg):
+        if self._new_line_in_the_last_msg:
+            return ""
+        if len(msg) > 0 and msg[0] == "\r":
+            return ""
+        if not self._new_line_in_the_last_msg:
+            return "\n"
+
+    @staticmethod
+    def set_last_character(msg):
+        if len(msg) == 0:
+            StreamHandlerEnsureMessageFromNewLine._new_line_in_the_last_msg = True
+        else:
+            StreamHandlerEnsureMessageFromNewLine._new_line_in_the_last_msg = msg[-1] == "\n"
+
+
+class StreamHandlerSameLine(StreamHandlerEnsureMessageFromNewLine):
+    terminator = ""
+    beginner = "\r"
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            msg = self.beginner + msg + self.terminator
+            self.set_last_character(msg)
+            stream.write(msg)
+            self.flush()
+        except RecursionError:  # See issue 36272
+            raise
+        except Exception:
+            self.handleError(record)
+
+
 class AwesomeFormatter(logging.Formatter):
     """
     logging.Formatter which adds colors to messages and shortens thread ids.
@@ -109,6 +167,7 @@ class NumpyLogRecord(logging.LogRecord):
     def array2string(arr: "numpy.ndarray") -> str:
         """Format numpy array as a string."""
         import numpy
+
         shape = str(arr.shape)[1:-1]
         if shape.endswith(","):
             shape = shape[:-1]
@@ -161,19 +220,58 @@ class TqdmLogger(io.StringIO):
     Redirects tqdm stdout stream to logger.
     """
 
-    def __init__(self, logger: logging.Logger, level: int):
+    def __init__(
+        self, logger: Optional[logging.Logger], level: int, keep_new_line: Optional[bool] = None
+    ):
         super().__init__()
+        if keep_new_line is None:
+            if logger is None:
+                keep_new_line = False
+            else:
+                keep_new_line = True
+
+        if not keep_new_line and logger is not None:
+            raise ValueError("TqdmLogger with keep_new_line=False works only without logger set")
+        if logger is None:
+            logger = self._get_default_logger(keep_new_line)
         self.logger = logger
         self.level = level
+        self.keep_new_line = keep_new_line
 
     def write(self, text):
         text = text.replace("\r", "").replace("\x1b[A", "").strip()
         if len(text) != 0:
             self.logger.log(self.level, text)
 
+    @staticmethod
+    def _get_default_logger(keep_new_line: bool):
+        root_logger = logging.getLogger()
+        if keep_new_line:
+            handler = logging.StreamHandler()
+        else:
+            handler = StreamHandlerSameLine()
+        handler.setFormatter(root_logger.handlers[0].formatter)
+        default_logger = logging.getLogger("tqdm")
+        default_logger.handlers = [handler]
+        default_logger.propagate = False
 
-def tqdm_logger(iterable, logger: logging.Logger, level: int = logging.INFO, *args, **kwargs):
-    return TqdmWithRemaining(iterable, *args, file=TqdmLogger(logger, level), **kwargs)
+        return default_logger
+
+
+def tqdm_logger(
+    iterable,
+    logger: logging.Logger = None,
+    level: int = logging.INFO,
+    keep_new_line: Optional[bool] = None,
+    *args,
+    **kwargs,
+):
+    return TqdmWithRemaining(
+        iterable,
+        *args,
+        file=TqdmLogger(logger, level, keep_new_line=keep_new_line),
+        **kwargs,
+    )
 
 
 def timeit(logger: Optional[logging.Logger] = None, level: int = logging.DEBUG):
@@ -232,6 +330,9 @@ def setup(level: Union[str, int], coloring: bool = True, fmt: Optional[str] = No
     :param level: The global logging level.
     :param coloring: Use logging coloring or not.
     """
+    datefmt = "%H:%M:%S"
+    coloring_fmt = "%(colored_short_levelname)s-%(asctime)s-%(name)s-%(colored_message)s"
+    no_coloring_fmt = "%(levelname)s-%(asctime)s-%(name)s-%(message)s"
 
     if not isinstance(level, int):
         level = logging._nameToLevel[level]
@@ -251,15 +352,25 @@ def setup(level: Union[str, int], coloring: bool = True, fmt: Optional[str] = No
     root = logging.getLogger()
     root.setLevel(level)
 
-    handler = root.handlers[0]
-    datefmt = "%H:%M:%S"
-    if not sys.stdin.closed and coloring:
-        fmt = (
-            "%(colored_short_levelname)s-%(asctime)s-%(name)s-%(colored_message)s"
-            if fmt is None
-            else fmt
-        )
-        handler.setFormatter(AwesomeFormatter(fmt, datefmt))
-    else:
-        fmt = "%(levelname)s-%(asctime)s-%(name)s-%(message)s" if fmt is None else fmt
-        handler.setFormatter(logging.Formatter(fmt, datefmt))
+    formatter = logging.Formatter
+    if fmt is None:
+        if not sys.stdin.closed and coloring:
+            fmt = coloring_fmt
+            formatter = AwesomeFormatter
+        else:
+            fmt = no_coloring_fmt
+
+    new_handlers = []
+    for handler in root.handlers:
+        if isinstance(handler, logging.StreamHandler):
+            new_handler = StreamHandlerEnsureMessageFromNewLine(handler.stream)
+            new_handler.setLevel(handler.level)
+            new_handler.set_name(handler.get_name())
+            new_handler.filters = handler.filters
+            handler = new_handler
+
+        handler.setFormatter(formatter(fmt, datefmt))
+        new_handlers.append(handler)
+
+    root.handlers = new_handlers
+
