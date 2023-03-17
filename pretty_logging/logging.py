@@ -250,7 +250,11 @@ class TqdmLogger(io.StringIO):
             handler = logging.StreamHandler()
         else:
             handler = StreamHandlerSameLine()
-        handler.setFormatter(root_logger.handlers[0].formatter)
+        if len(root_logger.handlers) == 0:
+            formatter = get_formatter()
+        else:
+            formatter = root_logger.handlers[0].formatter
+        handler.setFormatter(formatter)
         default_logger = logging.getLogger("tqdm")
         default_logger.handlers = [handler]
         default_logger.propagate = False
@@ -322,6 +326,21 @@ def with_logger(cls):
     return cls
 
 
+def get_formatter(datefmt: str = "%H:%M:%S", coloring: bool = True, fmt: Optional[str] = None):
+    coloring_fmt = "%(colored_short_levelname)s-%(asctime)s-%(name)s-%(colored_message)s"
+    no_coloring_fmt = "%(levelname)s-%(asctime)s-%(name)s-%(message)s"
+
+    formatter = logging.Formatter
+    if fmt is None:
+        if not sys.stdin.closed and coloring:
+            fmt = coloring_fmt
+            formatter = AwesomeFormatter
+        else:
+            fmt = no_coloring_fmt
+
+    return formatter(fmt, datefmt)
+
+
 def setup(level: Union[str, int], coloring: bool = True, fmt: Optional[str] = None) -> None:
     """
     Make stdout and stderr unicode friendly in case of misconfigured \
@@ -331,8 +350,6 @@ def setup(level: Union[str, int], coloring: bool = True, fmt: Optional[str] = No
     :param coloring: Use logging coloring or not.
     """
     datefmt = "%H:%M:%S"
-    coloring_fmt = "%(colored_short_levelname)s-%(asctime)s-%(name)s-%(colored_message)s"
-    no_coloring_fmt = "%(levelname)s-%(asctime)s-%(name)s-%(message)s"
 
     if not isinstance(level, int):
         level = logging._nameToLevel[level]
@@ -352,13 +369,7 @@ def setup(level: Union[str, int], coloring: bool = True, fmt: Optional[str] = No
     root = logging.getLogger()
     root.setLevel(level)
 
-    formatter = logging.Formatter
-    if fmt is None:
-        if not sys.stdin.closed and coloring:
-            fmt = coloring_fmt
-            formatter = AwesomeFormatter
-        else:
-            fmt = no_coloring_fmt
+    formatter = get_formatter(datefmt, coloring, fmt)
 
     new_handlers = []
     for handler in root.handlers:
@@ -369,7 +380,7 @@ def setup(level: Union[str, int], coloring: bool = True, fmt: Optional[str] = No
             new_handler.filters = handler.filters
             handler = new_handler
 
-        handler.setFormatter(formatter(fmt, datefmt))
+        handler.setFormatter(formatter)
         new_handlers.append(handler)
 
     root.handlers = new_handlers
