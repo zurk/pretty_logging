@@ -2,10 +2,11 @@ import codecs
 import datetime
 import io
 import logging
+import os
 import re
 import sys
 import time
-from functools import wraps
+from functools import wraps, cached_property
 from pathlib import Path
 from typing import Callable, Dict, Optional, Sequence, Tuple, Union
 
@@ -116,6 +117,10 @@ class AwesomeFormatter(logging.Formatter):
     ]
     GREEN_RE = re.compile("|".join(GREEN_MARKERS))
 
+    @cached_property
+    def local_rank(self) -> Optional[int]:
+        return get_local_rank()
+
     def _get_formatter(self, record: logging.LogRecord) -> Dict[str, str]:
         level_color = "0"
         text_color = "0"
@@ -143,6 +148,7 @@ class AwesomeFormatter(logging.Formatter):
         formatters["colored_levelname"] = f"\033[{level_color}m{record.levelname}\033[0m"
         formatters["colored_short_levelname"] = f"\033[{level_color}m{short_levelname}\033[0m"
         formatters["colored_message"] = f"\033[{text_color}m{record.message}\033[0m"
+        formatters["local_rank"] = f"rank{self.local_rank}-" if self.local_rank is not None else ""
 
         return formatters
 
@@ -326,9 +332,16 @@ def with_logger(cls):
     return cls
 
 
+def get_local_rank() -> Optional[int]:
+    try:
+        return int(os.environ.get("LOCAL_RANK"))
+    except Exception:
+        return None
+
+
 def get_formatter(datefmt: str = "%H:%M:%S", coloring: bool = True, fmt: Optional[str] = None):
-    coloring_fmt = "%(colored_short_levelname)s-%(asctime)s-%(name)s-%(colored_message)s"
-    no_coloring_fmt = "%(levelname)s-%(asctime)s-%(name)s-%(message)s"
+    coloring_fmt = "%(colored_short_levelname)s-%(local_rank)s%(asctime)s-%(name)s-%(colored_message)s"
+    no_coloring_fmt = "%(levelname)s-%(local_rank)s%(asctime)s-%(name)s-%(message)s"
 
     formatter = logging.Formatter
     if fmt is None:
@@ -341,14 +354,22 @@ def get_formatter(datefmt: str = "%H:%M:%S", coloring: bool = True, fmt: Optiona
     return formatter(fmt, datefmt)
 
 
-def setup(level: Union[str, int], coloring: bool = True, fmt: Optional[str] = None) -> None:
+def setup(
+    level: Union[str, int],
+    coloring: bool = True,
+    fmt: Optional[str] = None,
+) -> None:
     """
     Make stdout and stderr unicode friendly in case of misconfigured \
     environments, initializes the logging, structured logging and \
     enables colored logs if it is appropriate.
+
     :param level: The global logging level.
     :param coloring: Use logging coloring or not.
+    :param fmt: Use custom format string
+    :param use_local_rank: Add local rank info from accelerate.
     """
+
     datefmt = "%H:%M:%S"
 
     if not isinstance(level, int):
@@ -384,4 +405,3 @@ def setup(level: Union[str, int], coloring: bool = True, fmt: Optional[str] = No
         new_handlers.append(handler)
 
     root.handlers = new_handlers
-
