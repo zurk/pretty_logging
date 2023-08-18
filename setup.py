@@ -12,7 +12,7 @@ setup(
     description="Package to make logging prettier.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    version="1.1.0",
+    version="1.2.0",
     url="https://github.com/zurk/pretty_logging",
     download_url="https://github.com/zurk/pretty_logging",
     packages=["pretty_logging"],

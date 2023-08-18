@@ -405,3 +405,10 @@ def setup(
         new_handlers.append(handler)
 
     root.handlers = new_handlers
+
+
+class PrettyFileHandler(logging.FileHandler):
+    def __init__(self, filename, mode='a', encoding=None, delay=False, errors=None):
+        filename = Path(filename)
+        filename.parent.mkdir(exist_ok=True, parents=True)
+        super().__init__(filename, mode, encoding, delay, errors)
